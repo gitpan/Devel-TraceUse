@@ -6,9 +6,11 @@ use Test::More;
 use IPC::Open3;
 use File::Spec;
 use Config;
+use lib ();
 
 my $tlib  = File::Spec->catdir( 't', 'lib' );
 my $tlib2 = File::Spec->catdir( 't', 'lib2' );
+my $vlib  = defined $lib::VERSION ? " $lib::VERSION" : '';
 
 # all command lines prefixed with $^X -I"t/lib"
 my @tests = (
@@ -65,7 +67,7 @@ Modules used from -e:
    1.  M4, -e line 0 [main]
    2.    M5, M4.pm line 3
    3.      M6, M5.pm line 9 [M5::in]
-   7.      M7, M5.pm line 4
+   7.      M7 0, M5.pm line 4
    4.  M1, -e line 0 [main]
    5.    M2, M1.pm line 3
    6.      M3, M2.pm line 3
@@ -76,24 +78,24 @@ Modules used from -e:
    2.    M2, M1.pm line 3
    3.      M3, M2.pm line 3
 OUT
-    [ << 'OUT', '-d:TraceUse', "-Mlib=$tlib2", '-MM8', '-e1' ],
+    [ << "OUT", '-d:TraceUse', "-Mlib=$tlib2", '-MM8', '-e1' ],
 Modules used from -e:
-   0.  lib, -e line 0 [main]
+   0.  lib$vlib, -e line 0 [main]
 Modules used, but not reported:
   M8.pm
 OUT
-    [ << 'OUT', '-d:TraceUse', "-Mlib=$tlib2", '-MM1', '-MM8', '-e1' ],
+    [ << "OUT", '-d:TraceUse', "-Mlib=$tlib2", '-MM1', '-MM8', '-e1' ],
 Modules used from -e:
-   0.  lib, -e line 0 [main]
+   0.  lib$vlib, -e line 0 [main]
    0.  M1, -e line 0 [main]
    0.    M2, M1.pm line 3
    0.      M3, M2.pm line 3
    0.  M8, -e line 0 [main]
 OUT
-    [ << 'OUT', '-d:TraceUse', "-Mlib=$tlib2", '-MM7', '-MM8', '-e1' ],
+    [ << "OUT", '-d:TraceUse', "-Mlib=$tlib2", '-MM7', '-MM8', '-e1' ],
 Modules used from -e:
-   0.  lib, -e line 0 [main]
-   0.  M7, -e line 0 [main]
+   0.  lib$vlib, -e line 0 [main]
+   0.  M7 0, -e line 0 [main]
    0.  M8, -e line 0 [main]
 OUT
     [ << 'OUT', qw(-d:TraceUse -e), 'eval { require M10 }' ],
@@ -105,10 +107,10 @@ Modules used from -e:
    1.  M10, -e line 1 [main] (FAILED)
    2.  M10, -e line 3 [M11] (FAILED)
 OUT
-    [   << 'OUT', '-d:TraceUse', '-MM7', "-Mlib=$tlib2", '-MM1', '-MM8', '-e1' ],
+    [   << "OUT", '-d:TraceUse', '-MM7', "-Mlib=$tlib2", '-MM1', '-MM8', '-e1' ],
 Modules used from -e:
-   0.  M7, -e line 0 [main]
-   0.  lib, -e line 0 [main]
+   0.  M7 0, -e line 0 [main]
+   0.  lib$vlib, -e line 0 [main]
    0.  M1, -e line 0 [main]
    0.    M2, M1.pm line 3
    0.      M3, M2.pm line 3
@@ -119,14 +121,14 @@ Modules used from -e:
    1.  M4, -e line 0 [main]
    2.    M5, M4.pm line 3
    3.      M6, M5.pm line 9 [M5::in]
-  11.      M7, M5.pm line 4
+  11.      M7 0, M5.pm line 4
    4.  M1, -e line 0 [main]
    5.    M2, M1.pm line 3
    6.      M3, M2.pm line 3
    7.  M8, -e line 0 [main]
    8.  M10, -e line 0 [main]
-   9.    M11, M10.pm line 3 [M8]
-  10.    M12, M10.pm line 4 [M8]
+   9.    M11 1.01, M10.pm line 3 [M8]
+  10.    M12 1.12, M10.pm line 4 [M8]
 OUT
 );
 
@@ -176,7 +178,7 @@ for my $test (@tests) {
     # we want to ignore modules loaded by those libraries
     my $nums = 1;
     for my $lib (qw( lib sitecustomize.pl )) {
-        if ( grep /\. +.*\Q$lib\E,/, @errput ) {
+        if ( grep /\. +.*\Q$lib\E[^,]*,/, @errput ) {
             @errput = normalize( $lib, @errput );
             $nums = 0;
         }
@@ -204,7 +206,7 @@ sub normalize {
     my $tab;
     for (@lines) {
         s/^(\s*\d+)\./%%%%./;
-        if (/\.( +)\Q$lib\E,/) {
+        if (/\.( +)\Q$lib\E[^,]*,/) {
             $loaded_by = 1;
             $tab       = $1 . '  ';
             next;
@@ -223,18 +225,16 @@ sub add_sitecustomize {
     my ( $nums, $errput, @cmd ) = @_;
     my $sitecustomize_path
         = File::Spec->catfile( $Config{sitelib}, 'sitecustomize.pl' );
-    my $sitecustomize = do {
-        my @parts = File::Spec->splitpath($sitecustomize_path);
-        splice @parts, 1, 1, grep {length} File::Spec->splitdir( $parts[1] );
-        join '/', @parts;
-    };
+    my ($sitecustomize) = grep { /sitecustomize\.pl$/ } keys %INC;
 
     # provide some info to the tester
     if ( !$diag++ ) {
         diag "This perl has sitecustomize.pl enabled, ",
             -e $sitecustomize_path
-            ? "and the file exists"
-            : "but the file does not exist";
+            ? "and the file $sitecustomize_path exists"
+            : "but the file $sitecustomize_path does not exist";
+        diag "$sitecustomize was loaded successfully"
+            if $sitecustomize;
     }
 
     # the output depends on the existence of sitecustomize.pl
@@ -250,12 +250,14 @@ sub add_sitecustomize {
     }
     elsif ( grep { $_ eq '-d:TraceUse' } @cmd ) {
 
-        # Loaded first, but FAIL. The debugger will tell us.
+        # Loaded first, but FAIL. The debugger will tell us with an older Perl.
         #  Modules used from -e:
         #     1.  C:/perl/site/lib/sitecustomize.pl, -e line 0 [main] (FAILED)
-        $errput =~ s{Modules used from.*?^}
-                    {$&   0.  $sitecustomize, -e line 0 [main] (FAILED)\n}sm;
-        $nums = 0;
+        if ( $] < 5.011 ) {
+            $errput =~ s{Modules used from.*?^}
+                        {$&   0.  $sitecustomize, -e line 0 [main] (FAILED)\n}sm;
+            $nums = 0;
+        }
     }
 
     # updated values
