@@ -6,7 +6,7 @@ sub DB {}
 
 package Devel::TraceUse;
 
-our $VERSION = '2.03';
+our $VERSION = '2.04';
 
 BEGIN
 {
@@ -118,7 +118,7 @@ sub show_trace
 		my $caller = $mod->{caller};
 		my $message = sprintf( '%4s.', $mod->{rank} ) . '  ' x $pos;
 		$message .= "$mod->{module}";
-		my $version = $mod->{module}->VERSION;
+		my $version = ${"$mod->{module}\::VERSION"};
 		$message .= defined $version ? " $version," : ',';
 		$message .= " $caller->{filename}"
 			if defined $caller->{filename};
