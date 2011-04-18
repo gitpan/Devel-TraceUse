@@ -6,7 +6,7 @@ sub DB {}
 
 package Devel::TraceUse;
 
-our $VERSION = '2.04';
+our $VERSION = '2.05';
 
 BEGIN
 {
@@ -20,6 +20,7 @@ my %loaded;
 my %reported;
 my $rank = 0;
 my $quiet = 1;
+my $output_fh;
 
 # Hide core modules (for the specified version)?
 my $hide_core = 0;
@@ -34,6 +35,8 @@ sub import {
 	for(@_) {
 		if(/^hidecore(?::(.*))?/) {
 			$hide_core = numify( $1 ? $1 : $] );
+		} elsif (/^output:(.*)$/) {
+			open $output_fh, '>', $1 or die "can't open $1: $!";
 		} else {
 			die "Unknown argument to $class: $_\n";
 		}
@@ -107,35 +110,43 @@ sub trace_use
 	return;
 }
 
-sub show_trace
+sub show_trace_visitor
 {
-	my ( $mod, $pos ) = @_;
+	my ( $mod, $pos, $output_cb, @args ) = @_;
+
+	my $caller = $mod->{caller};
+	my $message = sprintf( '%4s.', $mod->{rank} ) . '  ' x $pos;
+	$message .= "$mod->{module}";
+	my $version = ${"$mod->{module}\::VERSION"};
+	$message .= defined $version ? " $version," : ',';
+	$message .= " $caller->{filename}"
+		if defined $caller->{filename};
+	$message .= " line $caller->{line}"
+		if defined $caller->{line};
+	$message .= " $mod->{eval}"
+		if $mod->{eval};
+	$message .= " [$caller->{package}]"
+		if $caller->{package} ne $caller->{filepackage};
+	$message .= " (FAILED)"
+		if !exists $INC{$mod->{filename}};
+
+	$output_cb->($message, @args);
+}
+
+sub visit_trace
+{
+	my ( $visitor, $mod, $pos, @args ) = @_;
 
 	my $hide = 0;
 
 	if ( ref $mod ) {
 		$mod = shift @$mod;
-		my $caller = $mod->{caller};
-		my $message = sprintf( '%4s.', $mod->{rank} ) . '  ' x $pos;
-		$message .= "$mod->{module}";
-		my $version = ${"$mod->{module}\::VERSION"};
-		$message .= defined $version ? " $version," : ',';
-		$message .= " $caller->{filename}"
-			if defined $caller->{filename};
-		$message .= " line $caller->{line}"
-			if defined $caller->{line};
-		$message .= " $mod->{eval}"
-			if $mod->{eval};
-		$message .= " [$caller->{package}]"
-			if $caller->{package} ne $caller->{filepackage};
-		$message .= " (FAILED)"
-			if !exists $INC{$mod->{filename}};
 
 		if($hide_core) {
 			$hide = exists $Module::CoreList::version{$hide_core}{$mod->{module}};
 		}
 
-		warn "$message\n" unless $hide;
+		$visitor->( $mod, $pos, @args ) unless $hide;
 
 		$reported{$mod->{filename}}++;
 	}
@@ -143,7 +154,7 @@ sub show_trace
 		$mod = { loaded => delete $loaded{$mod} };
 	}
 
-	show_trace( $used{$_}, $hide ? $pos : $pos + 1 )
+	visit_trace( $visitor, $used{$_}, $hide ? $pos : $pos + 1, @args )
 		for map { $INC{$_} || $_ } @{ $mod->{loaded} };
 }
 
@@ -151,11 +162,10 @@ sub show_trace
 sub numify {
 	my ($version) = @_;
 	$version =~ y/_//d;
-	my @parts = map { (length) < 3 ? sprintf "%03d", $_ : $_ }
-		split /\./, $version;
+	my @parts = split /\./, $version;
 
 	# %Module::CoreList::version's keys are x.yyyzzz *numbers*
-	return 0+ join '.', shift @parts, join '', @parts;
+	return 0+ ((shift @parts).'.'.join('', map { (length) < 3 ? (sprintf "%03d", $_) : $_ } @parts));
 }
 
 END
@@ -170,6 +180,9 @@ END
 		}
 	}
 
+    # let people know more accurate information is available
+    warn "Use -d:TraceUse for more accurate information.\n" if !$^P;
+
 	# load Module::CoreList if needed
 	if ($hide_core) {
 		local @INC = grep { $_ ne \&trace_use } @INC;
@@ -180,13 +193,17 @@ END
 			if !exists $Module::CoreList::version{$hide_core};
 	}
 
+	my $output = defined $output_fh
+		   ? sub { print $output_fh "$_[0]\n" }
+		   : sub { warn "$_[0]\n" };
+
 	# output the diagnostic
-	warn "Modules used from $root:\n";
-	show_trace( $root, 0 );
+	$output->("Modules used from $root:");
+	visit_trace( \&show_trace_visitor, $root, 0, $output );
 
 	# anything left?
 	if (%loaded) {
-		show_trace( $_, 0 ) for sort keys %loaded;
+		visit_trace( \&show_trace_visitor, $_, 0, $output ) for sort keys %loaded;
 	}
 
 	# did we miss some modules?
@@ -195,9 +212,11 @@ END
 		keys %INC
 		)
 	{
-		warn "Modules used, but not reported:\n" if @missed;
-		warn "  $_\n" for @missed;
+		$output->("Modules used, but not reported:") if @missed;
+		$output->("  $_") for @missed;
 	}
+
+	close $output_fh if defined $output_fh;
 }
 
 1;
@@ -245,13 +264,19 @@ In the very rare case when C<Devel::TraceUse> is not able to attach
 a loaded module to the tree, it will be reported at the end.
 
 Even though using C<-MDevel::TraceUse> is possible, it is preferable to
-use C<-d:TraceUse>, as the debugger will provide more accurate information
-in the case of C<eval>.
+use C<-d:TraceUse>, as the debugger will provide more accurate information.
+You will be reminded in the output.
 
 =head2 Parameters
 
-You can hide the core modules that your program used by providing the
-C<hidecore> argument:
+You can hide the core modules that your program used by providing parameters
+at C<use> time:
+
+  $ perl -d:TraceUse[=<option1>:<value1>[,<option2>:<value2>[...]]]
+
+=over 4
+
+=item C<hidecore>
 
   $ perl -d:TraceUse=hidecore your_program.pl
 
@@ -269,6 +294,20 @@ I<x.yyyzzz> (decimal). For example, the strings C<5.8.1>, C<5.08.01>,
 C<5.008.001> and C<5.008001> will all represent Perl version 5.8.1,
 and C<5.5.30>, C<5.005_03> will all represent Perl version 5.005_03.
 
+=item C<output>
+
+  $ perl -d:TraceUse=output=out.txt your_program.pl
+
+This will output the TraceUse result to the given file instead of warn.
+
+Note that TraceUse warnings will still be output as warnings.
+
+The output file is opened at initialization time, so there should be no
+surprise in relative path interpretation even if your program changes
+the current directory.
+
+=back
+
 =head1 AUTHORS
 
 chromatic, C<< <chromatic at wgz.org> >>
@@ -278,6 +317,8 @@ Philippe Bruhat, C<< <book at cpan.org> >>
 =head2 Contributors
 
 C<hidecore> option contributed by David Leadbeater, C<< <dgl@dgl.cx> >>.
+
+C<output> option contributed by Olivier MenguE<eacute>, C<< <dolmen@cpan.org> >>.
 
 =head1 BUGS
 

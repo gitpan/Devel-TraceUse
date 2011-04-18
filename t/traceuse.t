@@ -6,6 +6,7 @@ use Test::More;
 use IPC::Open3;
 use File::Spec;
 use Config;
+use Devel::TraceUse ();
 use lib ();
 
 my $tlib  = File::Spec->catdir( 't', 'lib' );
@@ -137,74 +138,119 @@ if ( eval { require Module::CoreList; 1; } ) {
     diag "Module::CoreList $Module::CoreList::VERSION installed";
 
     # Module::CoreList always knew about those
-    push @tests, [ << 'OUT', '-d:TraceUse=hidecore', '-Mstrict', '-e1' ],
-Modules used from -e:
-OUT
+    push @tests,
         [ << 'OUT', '-d:TraceUse=hidecore:5.5.30', '-MConfig', '-e1' ],
 Modules used from -e:
 OUT
         [ << 'OUT', '-d:TraceUse=hidecore:5.006001', '-MConfig', '-e1' ],
 Modules used from -e:
 OUT
-        [ << "OUT", '-d:TraceUse=hidecore:4', '-e1' ],
-Module::CoreList $Module::CoreList::VERSION doesn't know about Perl 4
+        if $] < 5.013010;
+    push @tests, [ [
+        "Module::CoreList $Module::CoreList::VERSION doesn't know about Perl 4"
+    ], << "OUT", '-d:TraceUse=hidecore:4', '-e1' ];
 Modules used from -e:
 OUT
-        ;
+
+    # does Module::CoreList know about this Perl?
+    my $this_perl = Devel::TraceUse::numify($]);
+    my @warns
+        = exists $Module::CoreList::version{$this_perl}
+        ? ()
+        : ([ "Module::CoreList $Module::CoreList::VERSION doesn't know about Perl $this_perl" ]);
+    push @tests, [ @warns,
+       << "OUT", '-d:TraceUse=hidecore', '-Mstrict', '-e1' ];
+Modules used from -e:
+OUT
 
     # Module::CoreList didn't know about 5.001 until its version 2.00
     push @tests, [ << 'OUT', '-d:TraceUse=hidecore:5.1', '-MConfig', '-e1' ],
 Modules used from -e:
    1.  Config, -e line 0 [main]
 OUT
-        if $Module::CoreList::VERSION >= 2;
+        if $Module::CoreList::VERSION >= 2 && $] < 5.013010;
 }
 else {
     diag "Module::CoreList not installed";
-    push @tests, [ << 'OUT', '-d:TraceUse=hidecore', '-e1' ],
-Can't locate Module/CoreList.pm in @INC (@INC contains: <DELETED>)
-END failed--call queue aborted.
-OUT
-        ;
+    push @tests, [ [
+        q"Can't locate Module/CoreList.pm in @INC (@INC contains: <DELETED>)",
+         'END failed--call queue aborted.'
+    ], '', '-d:TraceUse=hidecore', '-e1' ];
 }
+
+my $warn_d = 'Use -d:TraceUse for more accurate information.';
 
 # -MDevel::TraceUse usually produces the same output as -d:TraceUse
 for ( 0 .. $#tests ) {
+    unshift @{ $tests[$_] }, [] unless ref $tests[$_][0];
     push( @tests, [ @{ $tests[$_] } ] );
+    $tests[-1][0] = [ @{ $tests[$_][0] } ];
     # keep options the same
-    $tests[-1][1] =~ s/^-d:TraceUse/-MDevel::TraceUse/;
+    $tests[-1][2] =~ s/^-d:TraceUse/-MDevel::TraceUse/;
+    # also expect the note about -d:TraceUse
+    unshift @{ $tests[-1][0] }, $warn_d;
 }
 
 # but there are some exceptions
 push @tests, (
-    [ << 'OUT', qw(-d:TraceUse -e), 'eval q(use M1)' ],
+    [ [], << 'OUT', qw(-d:TraceUse -e), 'eval q(use M1)' ],
 Modules used from -e:
    1.  M1, -e line 1 (eval 1) [main]
    2.    M2, M1.pm line 3
    3.      M3, M2.pm line 3
 OUT
-    [ << 'OUT', qw(-MDevel::TraceUse -e), 'eval q(use M1)' ],
+    [ [$warn_d], << 'OUT', qw(-MDevel::TraceUse -e), 'eval q(use M1)' ],
 Modules used from -e:
    1.  M1, (eval 1) [main]
    2.    M2, M1.pm line 3
    3.      M3, M2.pm line 3
 OUT
-    [ << 'OUT', qw(-d:TraceUse -MM9 -e1) ],
+    [ [], << 'OUT', qw(-d:TraceUse -MM9 -e1) ],
 Modules used from -e:
    1.  M9, -e line 0 [main]
    2.    M6, M9.pm line 3 (eval 1)
 OUT
-    [ << 'OUT', qw(-MDevel::TraceUse -MM9 -e1) ],
+    [ [$warn_d], << 'OUT', qw(-MDevel::TraceUse -MM9 -e1) ],
 Modules used from -e:
    1.  M9, -e line 0 [main]
    2.  M6, (eval 1) [M9]
 OUT
 );
 
-plan tests => scalar @tests;
+my @outputs = (
+    undef,
+    'out.txt',
+    File::Spec->rel2abs('out.txt'),
+);
 
-for my $test (@tests) {
-    my ( $errput, @cmd ) = @$test;
+plan tests => (scalar(@outputs) * scalar(@tests));
+
+my @temp_files;
+
+# Clean-up
+END {
+    unlink for grep { -f $_ } @temp_files;
+}
+
+foreach my $o (@outputs) {
+    run_test($o, @$_) for @tests;
+}
+
+sub run_test {
+    my ( $output_file, $warns, $errput, @cmd ) = @_;
+
+    if ( defined $output_file ) {
+        #diag $output_file";
+        @cmd = map {
+            s/^(-.*?:TraceUse=..*)$/$1,output:$output_file/;
+            s/^(-.*?:TraceUse)=?$/$1=output:$output_file/;
+            $_
+        } @cmd;
+        push @temp_files, $output_file;
+    }
+
+    # Test name
+    ( my $mesg = "Trace for: perl @cmd" ) =~ s/\n/\\n/g;
 
     # run the test subcommand
     local ( *IN, *OUT, *ERR );
@@ -212,12 +258,27 @@ for my $test (@tests) {
     my @errput = map { s/[\015\012]*$//; $_ } <ERR>;
     waitpid( $pid, 0 );
 
+    my @out;
+    if (defined $output_file && length $errput) {
+        unless (-f $output_file) {
+            fail $mesg;
+            diag qq(Missing expected output file "$output_file");
+            return;
+        }
+        open my $f, '<:utf8', $output_file;
+        @out = map { s/[\015\012]*$//; $_ } <$f>;
+        close $f;
+        unlink $f;
+    }
+
     # we want to ignore modules loaded by those libraries
     my $nums = 1;
     for my $lib (qw( lib sitecustomize.pl )) {
-        if ( grep /\. +.*\Q$lib\E[^,]*,/, @errput ) {
-            @errput = normalize( $lib, @errput );
-            $nums = 0;
+        for my $arr (\@errput, \@out) {
+            if ( grep /\. +.*\Q$lib\E[^,]*,/, @$arr ) {
+                @$arr = normalize( $lib, @$arr );
+                $nums = 0;
+            }
         }
     }
 
@@ -225,16 +286,18 @@ for my $test (@tests) {
     ( $nums, $errput ) = add_sitecustomize( $nums, $errput, @cmd )
         if $Config{usesitecustomize};
 
+    # clean up the "Can't locate" error message
+    $errput[0] =~ s/\(\@INC contains: .*/(\@INC contains: <DELETED>)/ if @errput;
+
+    push @errput, @out;
+
     # remove version number of core modules used in testing
     s/(strict )[^,]+,/$1%%%,/g for @errput;
 
-    # clean up the "Can't locate" error message
-    $errput[0] =~ s/\(\@INC contains: .*/(\@INC contains: <DELETED>)/;
-
     # compare the results
-    ( my $mesg = "Trace for: perl @cmd" ) =~ s/\n/\\n/g;
     my @expected = map { s/[\015\012]*$//; $_ } split /^/, $errput;
     @expected = map { s/^(\s*\d+)\./%%%%./; $_ } @expected if !$nums;
+    unshift @expected, @$warns;
 
     is_deeply( \@errput, \@expected, $mesg )
         or diag map ( {"$_\n"} '--- Got ---', @errput ),
