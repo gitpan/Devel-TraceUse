@@ -6,7 +6,7 @@ sub DB {}
 
 package Devel::TraceUse;
 
-our $VERSION = '2.06';
+our $VERSION = '2.07';
 
 BEGIN
 {
@@ -168,7 +168,7 @@ sub numify {
 	return 0+ ((shift @parts).'.'.join('', map { (length) < 3 ? (sprintf "%03d", $_) : $_ } @parts));
 }
 
-END
+sub dump_result
 {
 	return if $quiet;
 
@@ -219,8 +219,19 @@ END
 	close $output_fh if defined $output_fh;
 }
 
+# Install the final hook
+# If perl runs with -c we want to dump
+CHECK {
+    # "perl -c" ?
+    dump_result() if $^C;
+}
+
+END { dump_result() }
+
 1;
 __END__
+
+=encoding iso-8859-1
 
 =head1 NAME
 
@@ -266,6 +277,11 @@ a loaded module to the tree, it will be reported at the end.
 Even though using C<-MDevel::TraceUse> is possible, it is preferable to
 use C<-d:TraceUse>, as the debugger will provide more accurate information.
 You will be reminded in the output.
+
+If you want to know only the modules loaded during the compile phase, use
+the standard C<-c> option of perl (see L<perlrun>):
+
+  $ perl -c -d:TraceUse your_program.pl
 
 =head2 Parameters
 
@@ -318,7 +334,9 @@ Philippe Bruhat, C<< <book at cpan.org> >>
 
 C<hidecore> option contributed by David Leadbeater, C<< <dgl@dgl.cx> >>.
 
-C<output> option contributed by Olivier MenguE<eacute>, C<< <dolmen@cpan.org> >>.
+C<output> option contributed by Olivier Mengué (C<< <dolmen@cpan.org> >>).
+
+C<perl -c> support contributed by Olivier Mengué (C<< <dolmen@cpan.org> >>).
 
 =head1 BUGS
 
@@ -362,7 +380,7 @@ L<http://search.cpan.org/dist/Devel-TraceUse>
 
 Copyright 2006 chromatic, most rights reserved.
 
-Copyright 2010 Philippe Bruhat (BooK), for the rewrite.
+Copyright 2010-2012 Philippe Bruhat (BooK), for the rewrite.
 
 =head1 LICENSE
 
