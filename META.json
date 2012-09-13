@@ -33,7 +33,7 @@
    "provides" : {
       "Devel::TraceUse" : {
          "file" : "lib/Devel/TraceUse.pm",
-         "version" : "2.07"
+         "version" : "2.08"
       }
    },
    "release_status" : "stable",
@@ -45,5 +45,5 @@
          "url" : "http://github.com/book/Devel-TraceUse"
       }
    },
-   "version" : "2.07"
+   "version" : "2.08"
 }
