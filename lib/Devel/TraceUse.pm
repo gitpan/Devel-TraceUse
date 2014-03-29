@@ -6,7 +6,7 @@ sub DB {}
 
 package Devel::TraceUse;
 
-our $VERSION = '2.09';
+our $VERSION = '2.091';
 
 BEGIN
 {
@@ -96,7 +96,7 @@ sub trace_use
 
     # clean up path
     $caller->{filename}
-        =~ s{^(?:@{[ join '|', map quotemeta, reverse sort @INC]})/?}{};
+        =~ s!^(?:@{[ join '|', map quotemeta, reverse sort @INC ]})/?!!;
 
     # try to compute the package associated with the file
     $caller->{filepackage} = $caller->{filename};
@@ -361,7 +361,7 @@ and C<5.5.30>, C<5.005_03> will all represent Perl version 5.005_03.
 
 =item C<output>
 
-  $ perl -d:TraceUse=output=out.txt your_program.pl
+  $ perl -d:TraceUse=output:out.txt your_program.pl
 
 This will output the TraceUse result to the given file instead of warn.
 

@@ -4,7 +4,7 @@
       "Philippe Bruhat (BooK) <book@cpan.org>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.112621",
+   "generated_by" : "Module::Build version 0.4204",
    "license" : [
       "perl_5"
    ],
@@ -21,19 +21,13 @@
    "prereqs" : {
       "build" : {
          "requires" : {
-            "Test::More" : 0
+            "Test::More" : "0"
          }
       },
       "configure" : {
          "requires" : {
-            "Module::Build" : "0.38"
+            "Module::Build" : "0.42"
          }
-      }
-   },
-   "provides" : {
-      "Devel::TraceUse" : {
-         "file" : "lib/Devel/TraceUse.pm",
-         "version" : "2.09"
       }
    },
    "release_status" : "stable",
@@ -45,5 +39,5 @@
          "url" : "http://github.com/book/Devel-TraceUse"
       }
    },
-   "version" : "2.09"
+   "version" : "2.091"
 }
